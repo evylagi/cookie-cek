@@ -193,7 +193,6 @@ class ChatGPTChecker(BaseChecker):
                         'active': data.get('is_authenticated', False),
                     }
                     
-                    # Get plan info
                     plan_response = requests.get(
                         'https://chatgpt.com/api/plan',
                         cookies=cookies,
@@ -208,7 +207,6 @@ class ChatGPTChecker(BaseChecker):
                             'structure': plan_data.get('structure', {}),
                         }
                     
-                    # Get location info
                     location_response = requests.get(
                         'https://chatgpt.com/api/account/info',
                         cookies=cookies,
@@ -317,7 +315,6 @@ class ClaudeChecker(BaseChecker):
                 result['features'] = access.get('features', [])
                 result['permissions'] = access.get('account_permissions', [])
                 
-                # Get plan details
                 plan_response = requests.get(
                     f'https://claude.ai/api/organizations/{org_uuid}/paused_subscription_details',
                     cookies=cookies,
@@ -396,7 +393,6 @@ class TikTokChecker(BaseChecker):
                         'private': account.get('private', False),
                     }
                     
-                    # Get stats
                     stats_response = requests.get(
                         'https://www.tiktok.com/api/user/detail/self/',
                         params={'aid': '1988', 'user_is_login': 'true'},
@@ -485,7 +481,6 @@ class NetflixChecker(BaseChecker):
                 result['error'] = "Not logged in - cookies expired"
                 return False, result
             
-            # Extract info using regex
             info = {}
             
             email_match = re.search(r'"email":"([^"]+)"', html)
@@ -653,6 +648,50 @@ def check_cookies():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/check/<platform>', methods=['POST'])
+def check_platform(platform: str):
+    try:
+        content = request.data.decode('utf-8')
+        
+        if not content or not content.strip():
+            return jsonify({'success': False, 'error': 'Empty request body'}), 400
+        
+        cookies = parse_cookies(content)
+        
+        if not cookies:
+            return jsonify({'success': False, 'error': 'No valid cookies found'}), 400
+        
+        checkers = {
+            'grok': GrokChecker(),
+            'chatgpt': ChatGPTChecker(),
+            'claude': ClaudeChecker(),
+            'tiktok': TikTokChecker(),
+            'netflix': NetflixChecker()
+        }
+        
+        if platform not in checkers:
+            return jsonify({
+                'success': False,
+                'error': f'Platform "{platform}" not supported',
+                'supported': list(checkers.keys())
+            }), 400
+        
+        valid, result = checkers[platform].check(cookies)
+        return jsonify({
+            'success': True,
+            'platform': platform,
+            'valid': valid,
+            'result': result,
+            'cookies_found': len(cookies)
+        })
+        
+    except UnicodeDecodeError:
+        return jsonify({'success': False, 'error': 'Invalid encoding'}), 400
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/detect', methods=['POST'])
 def detect():
     try:
@@ -672,10 +711,14 @@ def detect():
             'netflix': NetflixChecker()
         }
         
+        required_cookies = []
+        if platform in checkers:
+            required_cookies = checkers[platform].required_cookies
+        
         return jsonify({
             'success': True,
             'platform': platform,
-            'required_cookies': checkers[platform].required_cookies if platform in checkers else [],
+            'required_cookies': required_cookies,
             'cookies_found': list(cookies.keys())
         })
         
@@ -720,7 +763,9 @@ def index():
         'status': 'running',
         'platforms': ['grok', 'chatgpt', 'claude', 'tiktok', 'netflix'],
         'endpoints': {
+            '/': 'GET - API information',
             '/check': 'POST - Check cookies (auto-detect platform)',
+            '/check/<platform>': 'POST - Check cookies for specific platform',
             '/detect': 'POST - Detect platform from cookies',
             '/platforms': 'GET - List supported platforms'
         }
