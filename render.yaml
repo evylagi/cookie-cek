@@ -6,7 +6,7 @@ services:
     plan: free
     region: singapore
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn grok:grok
+    startCommand: gunicorn grok:app
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.10
