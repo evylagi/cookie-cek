@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: 2cap
+    runtime: python
+    repo: https://github.com/evylagi/cookie-cek
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn 2cap:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
