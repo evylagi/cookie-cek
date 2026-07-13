@@ -1,8 +1,3 @@
-"""
-ChatGPT Session Checker API - Minimal Version
-Only /gpt/check endpoint
-"""
-
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import requests
@@ -13,233 +8,437 @@ import os
 app = Flask(__name__)
 CORS(app)
 
-# Configuration
 PORT = int(os.environ.get('PORT', 10000))
 
-
 def parse_netscape_cookies(cookie_text):
-    """
-    Parse Netscape format cookies into a dictionary
-    """
     cookies = {}
     lines = cookie_text.strip().split('\n')
-    
     for line in lines:
         line = line.strip()
         if not line or line.startswith('#') or line.startswith('//'):
             continue
-        
         parts = line.split('\t')
         if len(parts) >= 7:
             cookie_name = parts[5].strip()
             cookie_value = parts[6].strip()
             if cookie_name and cookie_value:
                 cookies[cookie_name] = cookie_value
-    
     return cookies
 
+def safe_get(data, key, default='N/A'):
+    if not data:
+        return default
+    value = data.get(key)
+    return value if value is not None else default
 
-def get_account_details_from_html(html_content):
-    """
-    Extract account details from ChatGPT HTML response
-    """
-    account_details = {
-        'plan_type': None,
-        'user_id': None,
-        'user_name': None,
-        'user_email': None,
-        'user_picture': None,
-        'account_id': None,
-        'structure': None,
-        'is_fedramp': None,
-        'is_delinquent': None,
-        'residency_region': None,
-        'access_token': None,
-        'session_active': False,
-        'session_expires': None,
-        'auth_status': None
-    }
-    
+def check_chatgpt(cookie_text):
     try:
-        match = re.search(r'<script[^>]*id="client-bootstrap"[^>]*>(.*?)</script>', html_content, re.DOTALL)
-        
-        if not match:
-            return account_details
-            
-        bootstrap_data = json.loads(match.group(1))
-        
-        session_data = bootstrap_data.get('session', {})
-        account = session_data.get('account', {})
-        user = session_data.get('user', {})
-        
-        account_details['plan_type'] = account.get('planType')
-        account_details['account_id'] = account.get('id')
-        account_details['structure'] = account.get('structure')
-        account_details['is_fedramp'] = account.get('isFedrampCompliantWorkspace')
-        account_details['is_delinquent'] = account.get('isDelinquent')
-        account_details['residency_region'] = account.get('residencyRegion')
-        account_details['session_expires'] = session_data.get('expires')
-        account_details['user_id'] = user.get('id')
-        account_details['user_name'] = user.get('name')
-        account_details['user_email'] = user.get('email')
-        account_details['user_picture'] = user.get('picture')
-        
-        access_token = session_data.get('accessToken')
-        if access_token:
-            account_details['access_token'] = access_token[:100] + '...' if len(access_token) > 100 else access_token
-        
-        account_details['session_active'] = bool(account.get('planType'))
-        account_details['auth_status'] = bootstrap_data.get('authStatus')
-        
-        return account_details
-        
-    except Exception:
-        return account_details
+        cookies = parse_netscape_cookies(cookie_text)
+        headers = {
+            'host': 'chatgpt.com',
+            'user-agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 Chrome/150.0.0.0 Mobile Safari/537.36',
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9',
+        }
+        response = requests.get('https://chatgpt.com', cookies=cookies, headers=headers, timeout=10)
+        if response.status_code == 200:
+            match = re.search(r'<script[^>]*id="client-bootstrap"[^>]*>(.*?)</script>', response.text, re.DOTALL)
+            if match:
+                data = json.loads(match.group(1))
+                session = data.get('session', {})
+                account = session.get('account', {})
+                user = session.get('user', {})
+                return {
+                    "success": True,
+                    "details": {
+                        "user_name": safe_get(user, 'name'),
+                        "user_email": safe_get(user, 'email'),
+                        "user_id": safe_get(user, 'id'),
+                        "account_id": safe_get(account, 'id'),
+                        "plan_type": safe_get(account, 'planType', 'FREE'),
+                        "structure": safe_get(account, 'structure'),
+                        "residency_region": safe_get(account, 'residencyRegion'),
+                        "is_fedramp": safe_get(account, 'isFedrampCompliantWorkspace', 'False'),
+                        "is_delinquent": safe_get(account, 'isDelinquent', 'False'),
+                        "session_expires": safe_get(session, 'expires'),
+                        "auth_status": safe_get(data, 'authStatus')
+                    }
+                }
+        return {"success": False, "error": "Session invalid or expired"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
-
-def check_chatgpt_session(cookie_dict):
-    """
-    Check if ChatGPT session is valid
-    """
-    headers = {
-        'host': 'chatgpt.com',
-        'sec-ch-ua': '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"',
-        'sec-ch-ua-mobile': '?1',
-        'sec-ch-ua-platform': '"Android"',
-        'upgrade-insecure-requests': '1',
-        'user-agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Mobile Safari/537.36',
-        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-        'sec-fetch-site': 'cross-site',
-        'sec-fetch-mode': 'navigate',
-        'sec-fetch-dest': 'document',
-        'accept-language': 'en-US,en;q=0.9',
-        'priority': 'u=0, i',
-    }
-    
-    html_content = ""
-    account_details = {}
-    
+def check_claude(cookie_text):
     try:
-        response = requests.get('https://chatgpt.com', cookies=cookie_dict, headers=headers, timeout=10)
-        html_content = response.text
+        cookies = parse_netscape_cookies(cookie_text)
+        headers = {
+            'host': 'claude.ai',
+            'user-agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36',
+            'accept': 'application/json',
+            'anthropic-client-platform': 'web_claude_ai',
+        }
+        org_uuid = cookies.get('lastActiveOrg', '')
+        if not org_uuid:
+            return {"success": False, "error": "No organization UUID found"}
+        
+        response = requests.get(
+            f'https://claude.ai/edge-api/bootstrap/{org_uuid}/app_start',
+            cookies=cookies,
+            headers=headers,
+            timeout=10
+        )
         
         if response.status_code == 200:
-            account_details = get_account_details_from_html(html_content)
+            data = response.json()
+            account = data.get('account', {})
+            memberships = account.get('memberships', [])
+            org_data = {}
+            if memberships:
+                org_data = memberships[0].get('organization', {})
             
-            if account_details.get('plan_type'):
-                return True, account_details, html_content
+            plan_type = "free"
+            if org_data.get('rate_limit_tier'):
+                plan_type = org_data.get('rate_limit_tier')
             
-            session = requests.Session()
-            session.cookies.update(cookie_dict)
-            session.headers.update({
-                'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36',
-                'accept': 'application/json',
-            })
-            resp = session.get('https://chatgpt.com/api/auth/session', timeout=10)
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get('user'):
-                    account_details['user_name'] = data.get('user', {}).get('name')
-                    account_details['user_email'] = data.get('user', {}).get('email')
-                    account_details['session_active'] = True
-                    return True, account_details, html_content
-                
-        return False, account_details, html_content
-        
+            return {
+                "success": True,
+                "details": {
+                    "user_name": safe_get(account, 'display_name'),
+                    "user_email": safe_get(account, 'email_address'),
+                    "user_id": safe_get(account, 'uuid'),
+                    "account_id": safe_get(account, 'id'),
+                    "plan_type": plan_type,
+                    "organization": safe_get(org_data, 'name'),
+                    "org_id": safe_get(org_data, 'uuid'),
+                    "role": safe_get(memberships[0], 'role') if memberships else 'N/A',
+                    "seat_tier": safe_get(memberships[0], 'seat_tier') if memberships else 'N/A',
+                    "billing_type": safe_get(org_data, 'billing_type'),
+                    "verified": safe_get(account, 'is_verified', 'False'),
+                    "created_at": safe_get(account, 'created_at')
+                }
+            }
+        return {"success": False, "error": f"HTTP {response.status_code}"}
     except Exception as e:
-        return False, account_details, html_content
+        return {"success": False, "error": str(e)}
 
-
-@app.route('/gpt/check', methods=['POST'])
-def check_session():
-    """
-    Check ChatGPT session using provided cookies
-    
-    Request body:
-    {
-        "cookies": "Netscape format cookie string"
-    }
-    
-    Response:
-    {
-        "success": true/false,
-        "message": "Session is ACTIVE" or "Session is INACTIVE",
-        "details": {
-            "plan_type": "plus/free",
-            "user_name": "John Doe",
-            "user_email": "john@example.com",
-            ...
-        }
-    }
-    """
+def check_grok(cookie_text):
     try:
-        data = request.get_json()
-        
-        if not data:
-            return jsonify({
-                'success': False,
-                'error': 'No JSON data provided'
-            }), 400
-        
-        cookie_text = data.get('cookies')
-        
-        if not cookie_text:
-            return jsonify({
-                'success': False,
-                'error': 'Missing "cookies" field in request body'
-            }), 400
-        
-        # Parse cookies
         cookies = parse_netscape_cookies(cookie_text)
+        headers = {
+            'host': 'grok.com',
+            'user-agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36',
+            'accept': 'application/json',
+        }
+        response = requests.get(
+            'https://grok.com/api/auth/session',
+            cookies=cookies,
+            headers=headers,
+            timeout=10
+        )
         
-        if not cookies:
-            return jsonify({
-                'success': False,
-                'error': 'No valid cookies found in provided text'
-            }), 400
-        
-        # Check session
-        is_active, account_details, _ = check_chatgpt_session(cookies)
-        
-        if is_active:
-            return jsonify({
-                'success': True,
-                'message': 'Session is ACTIVE',
-                'details': account_details
-            }), 200
-        else:
-            return jsonify({
-                'success': False,
-                'message': 'Session is INACTIVE or invalid',
-                'details': account_details
-            }), 200
-            
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('status') == 'authenticated':
+                session = data.get('session', {})
+                tier_id = str(session.get('sessionTierId', '2'))
+                plan_map = {'2': 'Free', '3': 'SuperGrok', '4': 'SuperGrok Pro'}
+                
+                return {
+                    "success": True,
+                    "details": {
+                        "user_name": f"{session.get('givenName', '')} {session.get('familyName', '')}".strip() or 'N/A',
+                        "user_email": safe_get(session, 'email'),
+                        "user_id": safe_get(session, 'userId'),
+                        "plan_type": plan_map.get(tier_id, 'Free'),
+                        "tier_id": tier_id,
+                        "organization_id": safe_get(session, 'organizationId'),
+                        "organization_type": safe_get(session, 'organizationType'),
+                        "x_user_id": safe_get(session, 'xUserId'),
+                        "x_username": safe_get(session, 'xUsername'),
+                        "has_x_premium": str(bool(session.get('xSubscriptionType'))),
+                        "x_subscription_type": safe_get(session, 'xSubscriptionType'),
+                        "tos_accepted": safe_get(session, 'tosAcceptedVersion'),
+                        "session_id": safe_get(session, 'sessionId'),
+                        "email_domain": safe_get(session, 'emailDomain'),
+                        "create_time": safe_get(session, 'createTime')
+                    }
+                }
+            return {"success": False, "error": "Not authenticated"}
+        return {"success": False, "error": f"HTTP {response.status_code}"}
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return {"success": False, "error": str(e)}
 
+def check_netflix(cookie_text):
+    try:
+        cookies = parse_netscape_cookies(cookie_text)
+        session = requests.Session()
+        for name, value in cookies.items():
+            session.cookies.set(name, value, domain='.netflix.com', path='/')
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json, text/plain, */*',
+        }
+        session.headers.update(headers)
+        
+        response = session.get('https://www.netflix.com/YourAccount', timeout=15)
+        
+        if response.status_code == 200:
+            html = response.text
+            
+            email_match = re.search(r'"email":"([^"]+)"', html)
+            name_match = re.search(r'"firstName":"([^"]+)"', html)
+            plan_match = re.search(r'"planName":"([^"]+)"', html)
+            member_since = re.search(r'"memberSince":"([^"]+)"', html)
+            country_match = re.search(r'"currentCountry":"([^"]+)"', html)
+            status_match = re.search(r'"membershipStatus":"([^"]+)"', html)
+            next_billing = re.search(r'"nextBillingDate"[^}]*"value":"([^"]+)"', html)
+            payment_method = re.search(r'"paymentMethod"[^}]*"value":"([^"]+)"', html)
+            video_quality = re.search(r'"videoQuality"[^}]*"value":"([^"]+)"', html)
+            max_streams = re.search(r'"maxStreams"[^}]*"value":([0-9]+)', html)
+            
+            netflix_id = cookies.get('NetflixId', 'N/A')
+            if netflix_id != 'N/A':
+                netflix_id = netflix_id[:20] + '...'
+            
+            return {
+                "success": True,
+                "details": {
+                    "user_name": name_match.group(1) if name_match else 'N/A',
+                    "user_email": email_match.group(1) if email_match else 'N/A',
+                    "plan_type": plan_match.group(1) if plan_match else 'Unknown',
+                    "member_since": member_since.group(1) if member_since else 'N/A',
+                    "country": country_match.group(1) if country_match else 'N/A',
+                    "status": status_match.group(1) if status_match else 'N/A',
+                    "next_billing": next_billing.group(1) if next_billing else 'N/A',
+                    "payment_method": payment_method.group(1) if payment_method else 'N/A',
+                    "video_quality": video_quality.group(1) if video_quality else 'N/A',
+                    "max_streams": max_streams.group(1) if max_streams else 'N/A',
+                    "user_id": netflix_id,
+                    "is_premium": "Yes" if "Premium" in (plan_match.group(1) if plan_match else '') else "No"
+                }
+            }
+        return {"success": False, "error": f"HTTP {response.status_code}"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+def check_tiktok(cookie_text):
+    try:
+        cookies = parse_netscape_cookies(cookie_text)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36',
+            'Accept': 'application/json',
+        }
+        
+        response = requests.get(
+            'https://www.tiktok.com/passport/web/account/info/',
+            params={'aid': '1459', 'user_is_login': 'true'},
+            cookies=cookies,
+            headers=headers,
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('message') == 'success':
+                account = data.get('data', {})
+                
+                # Get additional stats
+                stats_response = requests.get(
+                    'https://www.tiktok.com/api/user/detail/self/',
+                    params={'aid': '1988', 'user_is_login': 'true'},
+                    cookies=cookies,
+                    headers=headers,
+                    timeout=10
+                )
+                
+                stats = {}
+                if stats_response.status_code == 200:
+                    stats_data = stats_response.json()
+                    if stats_data.get('statusCode') == 0:
+                        user_info = stats_data.get('userInfo', {})
+                        stats = user_info.get('stats', {})
+                
+                return {
+                    "success": True,
+                    "details": {
+                        "user_name": safe_get(account, 'screen_name'),
+                        "user_email": safe_get(account, 'email'),
+                        "user_id": safe_get(account, 'user_id_str'),
+                        "unique_id": safe_get(account, 'unique_id'),
+                        "verified": str(account.get('verified', False)),
+                        "private": str(account.get('privacy', {}).get('is_private', False)),
+                        "followers": stats.get('followerCount', 0),
+                        "following": stats.get('followingCount', 0),
+                        "videos": stats.get('videoCount', 0),
+                        "likes": stats.get('diggCount', 0),
+                        "plan_type": "verified" if account.get('verified', False) else "normal"
+                    }
+                }
+            return {"success": False, "error": data.get('message', 'Unknown error')}
+        return {"success": False, "error": f"HTTP {response.status_code}"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+def check_service(cookie_text, service_type):
+    service_map = {
+        'chatgpt': check_chatgpt,
+        'claude': check_claude,
+        'grok': check_grok,
+        'netflix': check_netflix,
+        'tiktok': check_tiktok
+    }
+    
+    if service_type not in service_map:
+        return {"success": False, "error": f"Unknown service: {service_type}. Available: chatgpt, claude, grok, netflix, tiktok"}
+    
+    return service_map[service_type](cookie_text)
+
+@app.route('/', methods=['GET'])
+def home():
+    return jsonify({
+        'name': 'Universal Cookie Checker API',
+        'version': '2.0.0',
+        'endpoints': {
+            '/health': 'GET - Health check',
+            '/check': 'POST - Auto-detect service',
+            '/chatgpt/check': 'POST - Check ChatGPT cookies',
+            '/claude/check': 'POST - Check Claude cookies',
+            '/grok/check': 'POST - Check Grok cookies',
+            '/netflix/check': 'POST - Check Netflix cookies',
+            '/tiktok/check': 'POST - Check TikTok cookies'
+        },
+        'supported_services': ['chatgpt', 'claude', 'grok', 'netflix', 'tiktok'],
+        'usage': {
+            'method': 'POST',
+            'body': '{"cookies": "Netscape format cookie string"}',
+            'example': 'curl -X POST https://your-api.com/chatgpt/check -H "Content-Type: application/json" -d \'{"cookies": "# Netscape..."}\''
+        }
+    })
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """
-    Health check endpoint for Render
-    """
     return jsonify({
         'status': 'healthy',
-        'service': 'ChatGPT Session Checker API',
+        'service': 'Universal Cookie Checker API',
+        'version': '2.0.0',
         'timestamp': str(datetime.utcnow())
-    }), 200
+    })
 
+@app.route('/check', methods=['POST'])
+def check_auto():
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No JSON data provided'}), 400
+    
+    cookie_text = data.get('cookies')
+    if not cookie_text:
+        return jsonify({'success': False, 'error': 'Missing "cookies" field'}), 400
+    
+    cookies = parse_netscape_cookies(cookie_text)
+    if not cookies:
+        return jsonify({'success': False, 'error': 'No valid cookies found'}), 400
+    
+    # Auto-detect service
+    if 'sessionKey' in cookies and 'routingHint' in cookies:
+        service = 'claude'
+    elif 'sessionid' in cookies and 'sid_tt' in cookies:
+        service = 'tiktok'
+    elif 'NetflixId' in cookies and 'SecureNetflixId' in cookies:
+        service = 'netflix'
+    elif 'sso' in cookies or 'cf_clearance' in cookies:
+        if 'grok' in str(cookies).lower():
+            service = 'grok'
+        else:
+            service = 'chatgpt'
+    else:
+        service = 'chatgpt'
+    
+    result = check_service(cookie_text, service)
+    result['detected_service'] = service
+    return jsonify(result)
+
+@app.route('/chatgpt/check', methods=['POST'])
+def check_chatgpt_endpoint():
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No JSON data provided'}), 400
+    
+    cookie_text = data.get('cookies')
+    if not cookie_text:
+        return jsonify({'success': False, 'error': 'Missing "cookies" field'}), 400
+    
+    result = check_chatgpt(cookie_text)
+    return jsonify(result)
+
+@app.route('/claude/check', methods=['POST'])
+def check_claude_endpoint():
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No JSON data provided'}), 400
+    
+    cookie_text = data.get('cookies')
+    if not cookie_text:
+        return jsonify({'success': False, 'error': 'Missing "cookies" field'}), 400
+    
+    result = check_claude(cookie_text)
+    return jsonify(result)
+
+@app.route('/grok/check', methods=['POST'])
+def check_grok_endpoint():
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No JSON data provided'}), 400
+    
+    cookie_text = data.get('cookies')
+    if not cookie_text:
+        return jsonify({'success': False, 'error': 'Missing "cookies" field'}), 400
+    
+    result = check_grok(cookie_text)
+    return jsonify(result)
+
+@app.route('/netflix/check', methods=['POST'])
+def check_netflix_endpoint():
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No JSON data provided'}), 400
+    
+    cookie_text = data.get('cookies')
+    if not cookie_text:
+        return jsonify({'success': False, 'error': 'Missing "cookies" field'}), 400
+    
+    result = check_netflix(cookie_text)
+    return jsonify(result)
+
+@app.route('/tiktok/check', methods=['POST'])
+def check_tiktok_endpoint():
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No JSON data provided'}), 400
+    
+    cookie_text = data.get('cookies')
+    if not cookie_text:
+        return jsonify({'success': False, 'error': 'Missing "cookies" field'}), 400
+    
+    result = check_tiktok(cookie_text)
+    return jsonify(result)
 
 @app.errorhandler(404)
 def not_found(e):
     return jsonify({
         'success': False,
-        'error': 'Endpoint not found. Available endpoints: POST /gpt/check, GET /health'
+        'error': 'Endpoint not found',
+        'available_endpoints': [
+            'GET /',
+            'GET /health',
+            'POST /check',
+            'POST /chatgpt/check',
+            'POST /claude/check',
+            'POST /grok/check',
+            'POST /netflix/check',
+            'POST /tiktok/check'
+        ]
     }), 404
 
-
 if __name__ == '__main__':
+    from datetime import datetime
     app.run(host='0.0.0.0', port=PORT)
