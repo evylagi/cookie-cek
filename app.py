@@ -4,7 +4,6 @@ import requests
 import json
 import re
 import os
-import configparser
 from datetime import datetime
 
 app = Flask(__name__)
@@ -60,13 +59,9 @@ def check_chatgpt(cookie_text):
                         "plan_type": safe_get(account, 'planType', 'FREE'),
                         "structure": safe_get(account, 'structure'),
                         "region": safe_get(account, 'residencyRegion'),
-                        "fedramp": str(safe_get(account, 'isFedrampCompliantWorkspace', 'False')),
-                        "delinquent": str(safe_get(account, 'isDelinquent', 'False')),
-                        "expires": safe_get(session, 'expires'),
                         "status": safe_get(data, 'authStatus')
                     }
                 }
-        
         return {"success": False, "error": "Session invalid or expired"}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -107,15 +102,9 @@ def check_claude(cookie_text):
                     "user_name": safe_get(account, 'display_name'),
                     "user_email": safe_get(account, 'email_address'),
                     "user_id": safe_get(account, 'uuid'),
-                    "account_id": safe_get(account, 'id'),
                     "plan_type": safe_get(org_data, 'rate_limit_tier', 'free'),
                     "organization": safe_get(org_data, 'name'),
-                    "org_id": safe_get(org_data, 'uuid'),
-                    "role": safe_get(memberships[0], 'role') if memberships else 'N/A',
-                    "seat_tier": safe_get(memberships[0], 'seat_tier') if memberships else 'N/A',
-                    "billing": safe_get(org_data, 'billing_type'),
-                    "verified": str(safe_get(account, 'is_verified', 'False')),
-                    "created": safe_get(account, 'created_at')
+                    "verified": str(safe_get(account, 'is_verified', 'False'))
                 }
             }
         return {"success": False, "error": f"HTTP {response.status_code}"}
@@ -155,17 +144,7 @@ def check_grok(cookie_text):
                         "user_email": safe_get(s, 'email'),
                         "user_id": safe_get(s, 'userId'),
                         "plan_type": plan_map.get(tier, 'Free'),
-                        "tier_id": tier,
-                        "org_id": safe_get(s, 'organizationId'),
-                        "org_type": safe_get(s, 'organizationType'),
-                        "x_user_id": safe_get(s, 'xUserId'),
-                        "x_username": safe_get(s, 'xUsername'),
-                        "x_premium": str(bool(s.get('xSubscriptionType'))),
-                        "x_sub_type": safe_get(s, 'xSubscriptionType'),
-                        "tos": safe_get(s, 'tosAcceptedVersion'),
-                        "session_id": safe_get(s, 'sessionId'),
-                        "email_domain": safe_get(s, 'emailDomain'),
-                        "created": safe_get(s, 'createTime')
+                        "x_username": safe_get(s, 'xUsername')
                     }
                 }
             return {"success": False, "error": "Not authenticated"}
@@ -199,13 +178,7 @@ def check_netflix(cookie_text):
                 "details": {
                     "user_name": re.search(r'"firstName":"([^"]+)"', html).group(1) if re.search(r'"firstName":"([^"]+)"', html) else 'N/A',
                     "user_email": re.search(r'"email":"([^"]+)"', html).group(1) if re.search(r'"email":"([^"]+)"', html) else 'N/A',
-                    "user_id": cookies.get('NetflixId', 'N/A')[:20] + '...',
                     "plan_type": re.search(r'"planName":"([^"]+)"', html).group(1) if re.search(r'"planName":"([^"]+)"', html) else 'Unknown',
-                    "member_since": re.search(r'"memberSince":"([^"]+)"', html).group(1) if re.search(r'"memberSince":"([^"]+)"', html) else 'N/A',
-                    "country": re.search(r'"currentCountry":"([^"]+)"', html).group(1) if re.search(r'"currentCountry":"([^"]+)"', html) else 'N/A',
-                    "status": re.search(r'"membershipStatus":"([^"]+)"', html).group(1) if re.search(r'"membershipStatus":"([^"]+)"', html) else 'N/A',
-                    "next_billing": re.search(r'"nextBillingDate"[^}]*"value":"([^"]+)"', html).group(1) if re.search(r'"nextBillingDate"[^}]*"value":"([^"]+)"', html) else 'N/A',
-                    "payment": re.search(r'"paymentMethod"[^}]*"value":"([^"]+)"', html).group(1) if re.search(r'"paymentMethod"[^}]*"value":"([^"]+)"', html) else 'N/A',
                     "premium": 'Yes' if 'Premium' in html else 'No'
                 }
             }
@@ -237,21 +210,6 @@ def check_tiktok(cookie_text):
             if data.get('message') == 'success':
                 account = data.get('data', {})
                 
-                # Get stats
-                stats_response = requests.get(
-                    'https://www.tiktok.com/api/user/detail/self/',
-                    params={'aid': '1988', 'user_is_login': 'true'},
-                    cookies=cookies,
-                    headers=headers,
-                    timeout=10
-                )
-                
-                stats = {}
-                if stats_response.status_code == 200:
-                    stats_data = stats_response.json()
-                    if stats_data.get('statusCode') == 0:
-                        stats = stats_data.get('userInfo', {}).get('stats', {})
-                
                 return {
                     "success": True,
                     "service": "tiktok",
@@ -260,13 +218,7 @@ def check_tiktok(cookie_text):
                         "user_email": safe_get(account, 'email'),
                         "user_id": safe_get(account, 'user_id_str'),
                         "username": safe_get(account, 'unique_id'),
-                        "verified": str(account.get('verified', False)),
-                        "private": str(account.get('privacy', {}).get('is_private', False)),
-                        "followers": stats.get('followerCount', 0),
-                        "following": stats.get('followingCount', 0),
-                        "videos": stats.get('videoCount', 0),
-                        "likes": stats.get('diggCount', 0),
-                        "plan_type": 'verified' if account.get('verified') else 'normal'
+                        "verified": str(account.get('verified', False))
                     }
                 }
             return {"success": False, "error": data.get('message', 'Unknown error')}
@@ -293,20 +245,74 @@ def home():
         'name': 'Cookie Checker API',
         'version': '2.0',
         'status': 'online',
-        'services': ['chatgpt', 'claude', 'grok', 'netflix', 'tiktok'],
-        'endpoints': ['/health', '/check', '/<service>/check']
+        'services': ['chatgpt', 'claude', 'grok', 'netflix', 'tiktok']
     })
 
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({'status': 'ok', 'timestamp': datetime.utcnow().isoformat()})
 
+@app.route('/chatgpt/check', methods=['POST'])
+def chatgpt_check():
+    try:
+        data = request.get_json()
+        if not data or 'cookies' not in data:
+            return jsonify({'success': False, 'error': 'Missing cookies'}), 400
+        result = check_chatgpt(data['cookies'])
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/claude/check', methods=['POST'])
+def claude_check():
+    try:
+        data = request.get_json()
+        if not data or 'cookies' not in data:
+            return jsonify({'success': False, 'error': 'Missing cookies'}), 400
+        result = check_claude(data['cookies'])
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/grok/check', methods=['POST'])
+def grok_check():
+    try:
+        data = request.get_json()
+        if not data or 'cookies' not in data:
+            return jsonify({'success': False, 'error': 'Missing cookies'}), 400
+        result = check_grok(data['cookies'])
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/netflix/check', methods=['POST'])
+def netflix_check():
+    try:
+        data = request.get_json()
+        if not data or 'cookies' not in data:
+            return jsonify({'success': False, 'error': 'Missing cookies'}), 400
+        result = check_netflix(data['cookies'])
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/tiktok/check', methods=['POST'])
+def tiktok_check():
+    try:
+        data = request.get_json()
+        if not data or 'cookies' not in data:
+            return jsonify({'success': False, 'error': 'Missing cookies'}), 400
+        result = check_tiktok(data['cookies'])
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/check', methods=['POST'])
 def auto_check():
     try:
         data = request.get_json()
         if not data or 'cookies' not in data:
-            return jsonify({'success': False, 'error': 'Missing cookies field'}), 400
+            return jsonify({'success': False, 'error': 'Missing cookies'}), 400
         
         cookies = parse_cookies(data['cookies'])
         if not cookies:
@@ -326,30 +332,6 @@ def auto_check():
             result = check_tiktok(data['cookies'])
         else:
             result = check_chatgpt(data['cookies'])
-        
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/<service>/check', methods=['POST'])
-def service_check(service):
-    try:
-        data = request.get_json()
-        if not data or 'cookies' not in data:
-            return jsonify({'success': False, 'error': 'Missing cookies field'}), 400
-        
-        if service == 'chatgpt':
-            result = check_chatgpt(data['cookies'])
-        elif service == 'claude':
-            result = check_claude(data['cookies'])
-        elif service == 'grok':
-            result = check_grok(data['cookies'])
-        elif service == 'netflix':
-            result = check_netflix(data['cookies'])
-        elif service == 'tiktok':
-            result = check_tiktok(data['cookies'])
-        else:
-            return jsonify({'success': False, 'error': f'Service {service} not found'}), 404
         
         return jsonify(result)
     except Exception as e:
