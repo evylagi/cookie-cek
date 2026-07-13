@@ -284,6 +284,10 @@ def check_tiktok(cookie_text):
     except Exception as e:
         return {"success": False, "service": "tiktok", "error": str(e)}
 
+# ============================================
+# ROUTES
+# ============================================
+
 @app.route('/', methods=['GET'])
 def home():
     return jsonify({
@@ -300,12 +304,7 @@ def home():
             '/netflix/check': 'POST - Check Netflix cookies',
             '/tiktok/check': 'POST - Check TikTok cookies'
         },
-        'supported_services': ['chatgpt', 'claude', 'grok', 'netflix', 'tiktok'],
-        'usage': {
-            'method': 'POST',
-            'body': '{"cookies": "Netscape format cookie string"}',
-            'example': 'curl -X POST https://your-api.com/chatgpt/check -H "Content-Type: application/json" -d \'{"cookies": "# Netscape..."}\''
-        }
+        'supported_services': ['chatgpt', 'claude', 'grok', 'netflix', 'tiktok']
     })
 
 @app.route('/health', methods=['GET'])
@@ -333,101 +332,85 @@ def check_auto():
             return jsonify({'success': False, 'error': 'No valid cookies found'}), 400
         
         if 'sessionKey' in cookies and 'routingHint' in cookies:
-            service = 'claude'
             result = check_claude(cookie_text)
         elif 'sessionid' in cookies and 'sid_tt' in cookies:
-            service = 'tiktok'
             result = check_tiktok(cookie_text)
         elif 'NetflixId' in cookies and 'SecureNetflixId' in cookies:
-            service = 'netflix'
             result = check_netflix(cookie_text)
         elif 'sso' in cookies:
-            service = 'grok'
             result = check_grok(cookie_text)
         else:
-            service = 'chatgpt'
             result = check_chatgpt(cookie_text)
         
-        result['detected_service'] = service
         return jsonify(result)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/chatgpt/check', methods=['POST'])
-def check_chatgpt_endpoint():
+def chatgpt_check():
     try:
         data = request.get_json()
         if not data:
             return jsonify({'success': False, 'error': 'No JSON data provided'}), 400
-        
         cookie_text = data.get('cookies')
         if not cookie_text:
             return jsonify({'success': False, 'error': 'Missing "cookies" field'}), 400
-        
         result = check_chatgpt(cookie_text)
         return jsonify(result)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/claude/check', methods=['POST'])
-def check_claude_endpoint():
+def claude_check():
     try:
         data = request.get_json()
         if not data:
             return jsonify({'success': False, 'error': 'No JSON data provided'}), 400
-        
         cookie_text = data.get('cookies')
         if not cookie_text:
             return jsonify({'success': False, 'error': 'Missing "cookies" field'}), 400
-        
         result = check_claude(cookie_text)
         return jsonify(result)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/grok/check', methods=['POST'])
-def check_grok_endpoint():
+def grok_check():
     try:
         data = request.get_json()
         if not data:
             return jsonify({'success': False, 'error': 'No JSON data provided'}), 400
-        
         cookie_text = data.get('cookies')
         if not cookie_text:
             return jsonify({'success': False, 'error': 'Missing "cookies" field'}), 400
-        
         result = check_grok(cookie_text)
         return jsonify(result)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/netflix/check', methods=['POST'])
-def check_netflix_endpoint():
+def netflix_check():
     try:
         data = request.get_json()
         if not data:
             return jsonify({'success': False, 'error': 'No JSON data provided'}), 400
-        
         cookie_text = data.get('cookies')
         if not cookie_text:
             return jsonify({'success': False, 'error': 'Missing "cookies" field'}), 400
-        
         result = check_netflix(cookie_text)
         return jsonify(result)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/tiktok/check', methods=['POST'])
-def check_tiktok_endpoint():
+def tiktok_check():
     try:
         data = request.get_json()
         if not data:
             return jsonify({'success': False, 'error': 'No JSON data provided'}), 400
-        
         cookie_text = data.get('cookies')
         if not cookie_text:
             return jsonify({'success': False, 'error': 'Missing "cookies" field'}), 400
-        
         result = check_tiktok(cookie_text)
         return jsonify(result)
     except Exception as e:
